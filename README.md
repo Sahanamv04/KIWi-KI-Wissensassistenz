@@ -10,7 +10,7 @@ The project aims to keep data processing within approved university infrastructu
 
 - **Natural-language question answering:** Allow users to ask questions about university procedures in everyday language.
 - **Retrieval-Augmented Generation:** Retrieve relevant information from approved knowledge sources and use it to generate context-aware answers.
-- **Source citations:** Provide references to documents and pages supporting each answer.
+- **Source citations:** Provide references to source records and URLs supporting each answer.
 - **Local deployment:** Explore an architecture that avoids sending university data to external LLM APIs.
 - **Reliable responses:** Reduce unsupported answers and allow the system to abstain when information is insufficient.
 - **Evaluation:** Assess retrieval quality, answer correctness, citation accuracy, and response time.
@@ -19,8 +19,8 @@ The project aims to keep data processing within approved university infrastructu
 
 The planned system follows a Retrieval-Augmented Generation workflow:
 
-1. **Document ingestion** — Load approved university documentation.
-2. **Text extraction and preprocessing** — Extract, clean, and prepare document content.
+1. **Data ingestion** — Load approved university knowledge records from CSV files.
+2. **Text preprocessing** — Prepare record questions, answers, and source details.
 3. **Chunking and metadata** — Divide content into passages and retain source information.
 4. **Embedding generation** — Convert passages into numerical representations for semantic search.
 5. **Vector storage** — Store embeddings, text, and metadata in ChromaDB.
@@ -37,7 +37,7 @@ The architecture and technology choices are preliminary and will be refined duri
 | Component | Technology |
 |---|---|
 | Programming language | Python |
-| Document processing | PyMuPDF |
+| Data processing | Python CSV module |
 | Text splitting | LangChain Text Splitters |
 | Embedding model | BGE-M3 |
 | Vector database | ChromaDB |
@@ -51,7 +51,7 @@ The architecture and technology choices are preliminary and will be refined duri
 
 ```text
 KIWi-KI-Wissensassistenz/
-├── data/              # Source PDF documents
+├── data/              # Source CSV data
 ├── chroma_db/         # Persistent vector database
 ├── docs/              # Project documentation
 ├── ingest.py          # Document processing and indexing
@@ -69,7 +69,7 @@ Before running KIWi, ensure that you have:
 - Ollama installed and running.
 - The required language and embedding models downloaded.
 - The project dependencies installed.
-- Approved PDF documents available for indexing.
+- Approved CSV files available for indexing.
 
 The commands below use `python3`, as in the current development environment.
 
@@ -123,49 +123,52 @@ LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:7b-instruct")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3")
 ```
 
-The default configuration also specifies the Ollama host, document directory, ChromaDB location, chunking settings, and number of retrieved passages.
+The default configuration also specifies the Ollama host, CSV data directory,
+ChromaDB location, chunking settings, and number of retrieved passages.
 
-### 5. Add documents
+### 5. Add CSV data
 
-Place the approved PDF documents you want KIWi to search inside the `data/` directory.
+Place the approved CSV files you want KIWi to search inside the `data/` directory.
+The ingestion script reads the question, answer, key fact, evidence, and source
+fields from each record. It uses UTF-8 CSV files (including files with a UTF-8 BOM).
+PDF files in `data/` are not used by the current ingestion script.
 
 For example:
 
 ```text
 data/
-├── document_1.pdf
-├── document_2.pdf
-└── document_3.pdf
+└── Data.csv
 ```
 
-Use only documents that are permitted for your intended development and deployment environment.
+Use only data that is permitted for your intended development and deployment environment.
 
 ## How to Run KIWi
 
 ### Step 1: Build the knowledge base
 
-Whenever you add or update source documents, run:
+Whenever you add or update source CSV files, run:
 
 ```bash
 python3 ingest.py
 ```
 
-The ingestion script extracts text from the PDFs, splits it into chunks, removes duplicate chunks, generates embeddings, and stores the results in ChromaDB.
+The ingestion script combines each CSV record's question, answer, evidence, and
+source details, splits long records into chunks, generates embeddings, and stores
+the results in ChromaDB.
 
 A successful run should display output similar to:
 
 ```text
-164 chunks -> 109 unique
-indexed 32/109
-indexed 64/109
-indexed 96/109
-indexed 109/109
-Done. Stored in ChromaDB: 109 chunks
+995 chunks from 857 CSV records
+indexed 32/995
+indexed 64/995
+...
+Done. Stored in ChromaDB: 995 chunks
 ```
 
-The exact numbers depend on the documents being indexed.
+The exact numbers depend on the CSV records and their lengths.
 
-**Important:** The current ingestion script rebuilds the collection when it runs. Make sure the source documents and configuration are correct before running it.
+**Important:** The current ingestion script rebuilds the collection when it runs. Make sure the source CSV files and configuration are correct before running it.
 
 ### Step 2: Start KIWi
 
@@ -183,29 +186,28 @@ Example:
 KIWi - THWS Knowledge Assistant
 Ask a question or type 'exit' to quit.
 
-You: What is the deadline for HAW-ForschungsSchub?
+You: How can students contact the ITSC Helpdesk in Schweinfurt?
 
-KIWi is searching your documents...
-
-KIWi: [Generated answer based on retrieved documents]
+KIWi: [Generated answer based on retrieved CSV records]
 
 Sources:
-  [1] Focus_Funding_September_2026.pdf p.9
-  [2] Focus_Funding_Juli_2026.pdf p.12
+  [1] THWS ITSC; record ADD-0032; ITSC > Student services > ITSC helpdesk Schweinfurt; verified 2026-11-07; https://itsc.thws.de/fuer-studierende/
 ```
 
-The answer and sources shown above are illustrative; actual output depends on the indexed documents and model response.
+The answer and source shown above are illustrative; actual output depends on the indexed data and model response.
+KIWi is instructed to give a useful explanation grounded in the retrieved records
+and include a direct website link in the answer when a source URL is available.
 
 ### Step 3: Ask more questions
 
 You can enter multiple questions without restarting the program:
 
 ```text
-You: What funding opportunities are available?
+You: What services does the ITSC provide for students?
 
-You: Which documents mention research funding?
+You: How do I contact the ITSC Helpdesk?
 
-You: What are the application requirements?
+You: What is the student services portal path?
 
 You: exit
 ```
@@ -232,21 +234,6 @@ This mode helps investigate whether the correct document passages are being retr
 
 ## Configuration
 
-### Question intent classification
-
-Each call to `answer()` classifies the question with the configured local
-Ollama model before retrieval. This adds one local model call per question;
-classification does not change retrieval or the answer and is not saved to a file.
-The interactive terminal displays `Intent: <label>` as soon as classification
-finishes, before the answer is generated.
-
-Supported intents are `deadline`, `requirements`, `procedure`, `opportunities`,
-`comparison`, `source_lookup`, `summary`, `factual`, and `other`.
-For example, "What is the deadline for HAW-ForschungsSchub?" should be classified
-as `deadline`. Labels are model predictions and should be evaluated against
-your questions. Failed or invalid classifications use `unknown` with status
-`error` or `invalid_response`; answering continues.
-
 The main configuration options are defined in `config.py`.
 
 | Setting | Purpose |
@@ -254,7 +241,7 @@ The main configuration options are defined in `config.py`.
 | `OLLAMA_HOST` | Address of the Ollama service |
 | `LLM_MODEL` | Language model used to generate answers |
 | `EMBED_MODEL` | Model used to create embeddings |
-| `DATA_DIR` | Directory containing source documents |
+| `DATA_DIR` | Directory containing source CSV files |
 | `CHROMA_DIR` | Directory used for persistent vector storage |
 | `COLLECTION` | Name of the ChromaDB collection |
 | `CHUNK_SIZE` | Maximum text chunk size used during splitting |
@@ -285,7 +272,7 @@ python3 -m pip install -r requirements.txt
 
 **No collection or database found**
 
-Run document ingestion first:
+Run CSV ingestion first:
 
 ```bash
 python3 ingest.py
@@ -293,11 +280,11 @@ python3 ingest.py
 
 **Poor or irrelevant answers**
 
-Inspect the retrieved passages using the `--chunks` option. Answer quality depends on the source documents, chunking, embeddings, retrieval, and language model.
+Answer quality depends on the CSV content, chunking, embeddings, retrieval, and language model.
 
 **Incorrect or unsupported answers**
 
-Check the cited passages against the original documents. Displayed citations do not, by themselves, guarantee that every generated claim is supported.
+Check the cited records and source URLs. Displayed citations do not, by themselves, guarantee that every generated claim is supported.
 
 ## Design Principles
 
@@ -320,6 +307,6 @@ Potential future improvements include:
 
 ## Project Status
 
-KIWi is under development. The current prototype supports PDF ingestion, embedding generation, semantic retrieval, local LLM-based answer generation, source references, and interactive terminal questions.
+KIWi is under development. The current prototype supports CSV ingestion, embedding generation, semantic retrieval, local LLM-based answer generation, source references, and interactive terminal questions.
 
 The architecture and technology stack remain preliminary and subject to change as requirements are clarified.
